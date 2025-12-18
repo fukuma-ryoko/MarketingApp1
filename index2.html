@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マーケティング クイズアプリ (API連動版)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            text-align: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 700px;
+            margin: 40px auto;
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #1a73e8;
+            margin-bottom: 30px;
+        }
+        #quiz-status {
+            font-size: 1.2em;
+            margin-bottom: 20px;
+            color: #555;
+        }
+        #question-area {
+            min-height: 100px;
+            margin-bottom: 30px;
+        }
+        #question-text {
+            font-size: 1.4em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            line-height: 1.6;
+            padding: 10px;
+            border-left: 5px solid #1a73e8;
+            text-align: left;
+        }
+        #choices button {
+            display: block;
+            width: 100%;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: left;
+        }
+        #choices button:hover:not(:disabled) {
+            background-color: #e0e9f7;
+            border-color: #1a73e8;
+        }
+        #choices button:disabled {
+            cursor: default;
+            opacity: 0.8;
+        }
+        .correct {
+            background-color: #c8e6c9 !important;
+            border-color: #4caf50 !important;
+            font-weight: bold;
+        }
+        .incorrect {
+            background-color: #ffcdd2 !important;
+            border-color: #f44336 !important;
+        }
+        #feedback {
+            font-size: 1.8em;
+            margin: 20px 0 10px 0;
+            font-weight: bold;
+            min-height: 30px;
+        }
+        #explanation {
+            font-size: 1em;
+            line-height: 1.6;
+            margin-top: 10px;
+            padding: 15px;
+            background-color: #f1f8e9;
+            border-radius: 5px;
+            text-align: left;
+            display: none; /* 最初は非表示 */
+        }
+        #next-button {
+            padding: 10px 20px;
+            font-size: 1em;
+            background-color: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-top: 20px;
+            display: none;
+        }
+        #next-button:hover {
+            background-color: #388e3c;
+        }
+        #results-area {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #e0f2f1;
+            border-radius: 10px;
+            display: none;
+        }
+        #results-area h2 {
+            color: #00796b;
+        }
+        #results-area p {
+            font-size: 1.1em;
+            line-height: 1.8;
+            margin-top: 15px;
+        }
+        /* 読み込み中のローディング表示 */
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>マーケティング クイズアプリ</h1>
+
+    <div id="quiz-status"></div>
+
+    <div id="quiz-container">
+        <div id="question-area">
+            <p id="question-text">クイズデータを読み込んでいます...</p>
+        </div>
+
+        <div id="choices">
+            </div>
+
+        <p id="feedback"></p>
+        <div id="explanation"></div>
+
+        <button id="next-button">次の問題へ</button>
+    </div>
+
+    <div id="results-area">
+        <h2>🎉 クイズ終了！ 🎉</h2>
+        <p id="score-text"></p>
+        <p id="comment-text"></p>
+        <button onclick="location.reload()" style="padding:10px 20px; font-size:1em; margin-top:15px; cursor:pointer;">もう一度挑戦する</button>
+    </div>
+</div>
+
+<script>
+// --- 設定: GASのWebアプリURL ---
+const API_URL = "https://script.google.com/macros/s/AKfycbz56xO3R78V8farGrvCl3ZGVkpJf2l5IyNM4XwyLF9TsQSHQtBMqZct0b2-BvDCqEPaQg/exec";
+
+// --- クイズロジック ---
+const TOTAL_QUESTIONS = 10;
+let quizData = [];
+let questionSet = [];
+let currentQuestionIndex = 0;
+let score = 0;
+
+// DOM要素の取得
+const questionTextElem = document.getElementById('question-text');
+const choicesElem = document.getElementById('choices');
+const feedbackElem = document.getElementById('feedback');
+const explanationElem = document.getElementById('explanation'); // 解説用
+const nextButton = document.getElementById('next-button');
+const quizStatusElem = document.getElementById('quiz-status');
+const quizContainer = document.getElementById('quiz-container');
+const resultsArea = document.getElementById('results-area');
+const scoreTextElem = document.getElementById('score-text');
+const commentTextElem = document.getElementById('comment-text');
+
+// 配列をシャッフルする関数
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
+// データ取得と初期化 (Async/Awaitを使用)
+async function initializeQuiz() {
+    try {
+        questionTextElem.textContent = "データをサーバーから取得中...";
+        questionTextElem.classList.add("loading");
+
+        // GASからJSONデータを取得
+        constresponse = await fetch(API_URL);
+        
+        // GASのWebアプリはリダイレクトされることがあるため、リダイレクトは自動追従されます
+        if (!constresponse.ok) {
+            throw new Error(`HTTP error! status: ${constresponse.status}`);
+        }
+        
+        const data = await constresponse.json();
+        
+        // 取得したデータを検証
+        if (!data || data.length === 0) {
+            throw new Error("データが空です");
+        }
+
+        quizData = data;
+        startQuiz();
+
+    } catch (error) {
+        console.error("データの取得に失敗しました:", error);
+        questionTextElem.textContent = "クイズデータの読み込みに失敗しました。インターネット接続を確認するか、しばらく経ってからリロードしてください。";
+        questionTextElem.classList.remove("loading");
+    }
+}
+
+function startQuiz() {
+    questionTextElem.classList.remove("loading");
+    
+    // データが不足している場合のチェック
+    if (quizData.length < TOTAL_QUESTIONS) {
+        questionTextElem.textContent = "エラー: 問題数が不足しています。";
+        return;
+    }
+
+    // 全データからランダムに10問選択
+    shuffleArray(quizData);
+    questionSet = quizData.slice(0, TOTAL_QUESTIONS);
+
+    currentQuestionIndex = 0;
+    score = 0;
+    
+    // UIをリセット
+    quizContainer.style.display = 'block';
+    resultsArea.style.display = 'none';
+    
+    displayQuestion();
+}
+
+// 現在の問題を表示
+function displayQuestion() {
+    if (currentQuestionIndex >= TOTAL_QUESTIONS) {
+        showResults();
+        return;
+    }
+
+    const q = questionSet[currentQuestionIndex];
+    
+    // ステータス表示の更新
+    quizStatusElem.textContent = `第 ${currentQuestionIndex + 1} 問 / 全 ${TOTAL_QUESTIONS} 問`;
+
+    // 問題文の表示
+    questionTextElem.textContent = q.Question;
+    
+    // 選択肢エリアのクリア
+    choicesElem.innerHTML = '';
+    
+    // フィードバックと解説をリセット・非表示
+    feedbackElem.textContent = '';
+    explanationElem.style.display = 'none';
+    explanationElem.textContent = '';
+    nextButton.style.display = 'none';
+
+    // 選択肢オブジェクトの準備
+    const choicesMap = {
+        'A': q.Choice_A,
+        'B': q.Choice_B,
+        'C': q.Choice_C,
+        'D': q.Choice_D
+    };
+    
+    const choiceKeys = ['A', 'B', 'C', 'D'];
+
+    choiceKeys.forEach(key => {
+        const button = document.createElement('button');
+        button.textContent = `${key}: ${choicesMap[key]}`;
+        button.dataset.answerKey = key;
+        // 選択肢クリック時のイベント設定
+        button.onclick = () => checkAnswer(button, q.Correct_Answer_Key, q.Explanation);
+        choicesElem.appendChild(button);
+    });
+}
+
+// 回答のチェック
+function checkAnswer(selectedButton, correctKey, explanationText) {
+    const selectedKey = selectedButton.dataset.answerKey;
+    const allButtons = choicesElem.querySelectorAll('button');
+
+    // 全てのボタンを無効化（連打防止）
+    allButtons.forEach(btn => btn.disabled = true);
+
+    if (selectedKey === correctKey) {
+        score++;
+        feedbackElem.textContent = '正解☆彡';
+        feedbackElem.style.color = '#4caf50';
+        selectedButton.classList.add('correct');
+    } else {
+        feedbackElem.textContent = '残念！';
+        feedbackElem.style.color = '#f44336';
+        selectedButton.classList.add('incorrect');
+        
+        // 正解のボタンをハイライトして教える
+        const correctButton = Array.from(allButtons).find(btn => btn.dataset.answerKey === correctKey);
+        if (correctButton) {
+            correctButton.classList.add('correct');
+        }
+    }
+
+    // 解説を表示 (JSONデータにExplanationがある場合)
+    if (explanationText) {
+        explanationElem.innerHTML = "<strong>【解説】</strong><br>" + explanationText;
+        explanationElem.style.display = 'block';
+    }
+    
+    nextButton.style.display = 'block';
+}
+
+// 次の問題へ
+nextButton.addEventListener('click', () => {
+    currentQuestionIndex++;
+    displayQuestion();
+});
+
+// 結果表示
+function showResults() {
+    quizContainer.style.display = 'none';
+    resultsArea.style.display = 'block';
+    quizStatusElem.textContent = ""; // ステータスを消す
+
+    const correctRate = Math.round((score / TOTAL_QUESTIONS) * 100);
+    let comment = "";
+
+    if (correctRate === 100) {
+        comment = "素晴らしい！あなたはマーケティングの知識を完璧にマスターしています！🎉";
+    } else if (correctRate >= 80) {
+        comment = "お見事！高い正解率です。あと少しで満点！この調子で頑張ってください！💪";
+    } else if (correctRate >= 50) {
+        comment = "よく頑張りました！半分以上正解です。間違えた部分を見直して、さらに知識を深めましょう！📚";
+    } else {
+        comment = "お疲れ様でした。次回はもっと高得点を目指しましょう！繰り返し挑戦することが成功への鍵です！🔑";
+    }
+
+    scoreTextElem.innerHTML = `正解数: <span style="font-size: 1.5em; color: #1a73e8;">${score}</span> 問 / 全 ${TOTAL_QUESTIONS} 問<br>正解率: <span style="font-size: 1.5em; color: #1a73e8;">${correctRate}%</span>`;
+    commentTextElem.textContent = comment;
+}
+
+// アプリケーション開始
+document.addEventListener('DOMContentLoaded', initializeQuiz);
+</script>
+
+</body>
+</html>
